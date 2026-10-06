@@ -1,33 +1,16 @@
-#!/usr/bin/env python3
-"""
-Задача: вывод погоды по списку городов.
-
-1. Загружает список городов по публичной ссылке (облако Mail.ru, при недоступности —
-   резервный источник gistpad.com) в память.
-2. Для каждого уникального города получает данные через API wttr.in (формат JSON).
-3. Строит модель WeatherData (Город, температура в °C, Страна).
-4. Выводит погоду по каждому городу: "Tokyo, Japan +18 °C".
-5. Группирует города по странам: количество городов, средняя / минимальная /
-   максимальная текущая температура.
-
-Используются только стандартные модули Python (json, urllib, dataclasses),
-никакие внешние пакеты не требуются.
-"""
-
 import json
 import re
 import sys
 import urllib.error
-import urllib.parse
 import urllib.request
 from collections import defaultdict
 from dataclasses import dataclass
 
-# Публичная ссылка на папку с файлом в облаке Mail.ru (из условия задания).
+# Публичная ссылка на папку с файлом в облаке Mail.ru
 CLOUD_PUBLIC_URL = "https://cloud.mail.ru/public/LWcw/kpMqFgztw"
 
 # Резервный источник с тем же списком городов (используется, если облако
-# недоступно или изменило формат отдачи).
+# недоступно или изменило формат отдачи)
 GISTPAD_URL = "https://gistpad.com/raw/vk-task-14"
 
 
@@ -36,12 +19,47 @@ GISTPAD_URL = "https://gistpad.com/raw/vk-task-14"
 API_URL = "https://wttr.in/{city}?format=j1"
 API_URL_FALLBACK = "http://wttr.in/{city}?format=j1"
 
-# Таймаут одного запроса в секундах.
 REQUEST_TIMEOUT = 10.0
 
 # Регулярное выражение для адреса публичной ссылки вида:
-# https://cloud.mail.ru/public/XXXX/YYYY  (два сегмента в пути).
+# https://cloud.mail.ru/public/XXXX/YYYY  (два сегмента в пути)
 WEBLINK_RE = re.compile(r"/public/([A-Za-z0-9_-]+/[A-Za-z0-9_-]+)/?$")
+
+
+def main() -> int:
+    try:
+        cities = load_cities()
+    except RuntimeError as exc:
+        print(f"Ошибка: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Загружено уникальных городов: {len(cities)}")
+
+    weather_items: list[WeatherData] = []
+    skipped: list[tuple[str, str]] = []
+
+    for city in cities:
+        print(f"Запрашиваю погоду для {city} ...")
+        try:
+            raw = fetch_weather_json(city)
+            weather_items.append(parse_weather(city, raw))
+        except RuntimeError as exc:
+            print(f"  ! {exc}", file=sys.stderr)
+            skipped.append((city, str(exc)))
+        except (KeyError, IndexError, ValueError) as exc:
+            print(f"  ! Неожиданный формат ответа для {city}: {exc}", file=sys.stderr)
+            skipped.append((city, str(exc)))
+
+    if not weather_items:
+        print("Не удалось получить погоду ни для одного города.", file=sys.stderr)
+        return 1
+
+    print_city_weather(weather_items)
+    summarize_by_country(weather_items)
+
+    if skipped:
+        print(f"\nНе обработано городов: {len(skipped)} ({[c for c, _ in skipped]})")
+    return 0
 
 
 @dataclass
@@ -224,41 +242,5 @@ def summarize_by_country(items: list[WeatherData]) -> None:
         )
 
 
-def main() -> int:
-    try:
-        cities = load_cities()
-    except RuntimeError as exc:
-        print(f"Ошибка: {exc}", file=sys.stderr)
-        return 1
-
-    print(f"Загружено уникальных городов: {len(cities)}")
-
-    weather_items: list[WeatherData] = []
-    skipped: list[tuple[str, str]] = []
-
-    for city in cities:
-        print(f"Запрашиваю погоду для {city} ...")
-        try:
-            raw = fetch_weather_json(city)
-            weather_items.append(parse_weather(city, raw))
-        except RuntimeError as exc:
-            print(f"  ! {exc}", file=sys.stderr)
-            skipped.append((city, str(exc)))
-        except (KeyError, IndexError, ValueError) as exc:
-            print(f"  ! Неожиданный формат ответа для {city}: {exc}", file=sys.stderr)
-            skipped.append((city, str(exc)))
-
-    if not weather_items:
-        print("Не удалось получить погоду ни для одного города.", file=sys.stderr)
-        return 1
-
-    print_city_weather(weather_items)
-    summarize_by_country(weather_items)
-
-    if skipped:
-        print(f"\nНе обработано городов: {len(skipped)} ({[c for c, _ in skipped]})")
-    return 0
-
-
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
